@@ -43,10 +43,13 @@ def prefix_grp2(obj,_pfx):
 
 @ispec_ia32("8>[ {66} ]+", _pfx=('opdsz', 16))
 def prefix_grp3(obj,_pfx):
+    if env.internals['mode']==16: _pfx=('opdsz',32)
     setpfx(obj,_pfx,2)
 
 @ispec_ia32("8>[ {67} ]+", _pfx=('adrsz', 32))
 def prefix_grp4(obj,_pfx):
+    if env.internals['mode']==32: _pfx=('adrsz',16)
+    if env.internals['mode']==16: _pfx=('adrsz',32)
     setpfx(obj,_pfx,3)
 
 @ispec_ia32("8>[ B X R W 0010 ]+", _pfx=('REX', True))
@@ -78,7 +81,6 @@ def ia32_nop(obj):
 @ispec_ia32(" 8>[ {fa}         ]", mnemonic = "CLI",     type=type_system)
 @ispec_ia32(" 8>[ {fb}         ]", mnemonic = "STI",     type=type_system)
 @ispec_ia32(" 8>[ {d7}         ]", mnemonic = "XLATB",   type=type_data_processing)
-@ispec_ia32(" 8>[ {6d}         ]", mnemonic = "IRETD",   type=type_other)
 @ispec_ia32(" 8>[ {9d}         ]", mnemonic = "POPFQ",   type=type_other)
 @ispec_ia32(" 8>[ {9c}         ]", mnemonic = "PUSHFQ",  type=type_other)
 @ispec_ia32("16>[ {0f}{06}     ]", mnemonic = "CLTS",    type=type_other)
@@ -101,15 +103,21 @@ def ia32_nop(obj):
 def ia32_nooperand(obj):
     pass
 
+@ispec_ia32(" 8>[ {cf}         ]", mnemonic = "IRETD",   type=type_other)
 @ispec_ia32(" 8>[ {98}         ]", mnemonic = "CWDE",    type=type_data_processing)
 @ispec_ia32(" 8>[ {99}         ]", mnemonic = "CDQ",     type=type_data_processing)
 def ia32_nooperand(obj):
     if obj.misc['opdsz']:
         if obj.mnemonic=="CWDE": obj.mnemonic="CBW"
         if obj.mnemonic=="CDQ" : obj.mnemonic="CWD"
+        if obj.mnemonic=="IRETD" : obj.mnemonic="IRET"
     if obj.misc['REX']:
+        REX = obj.misc['REX']
+        W,R,X,B = REX
         if obj.mnemonic=="CWDE": obj.mnemonic="CDQE"
         if obj.mnemonic=="CDQ" : obj.mnemonic="CQO"
+        if obj.mnemonic=="IRETD" and W==1:
+            obj.mnemonic="IRETQ"
 
 # instructions for which REP/REPNE is valid (see formats.py):
 @ispec_ia32(" 8>[ {6c} ]", mnemonic = "INSB",    type=type_system)
@@ -127,26 +135,38 @@ def ia32_nooperand(obj):
 @ispec_ia32(" 8>[ {ae} ]", mnemonic = "SCASB",   type=type_data_processing)
 @ispec_ia32(" 8>[ {af} ]", mnemonic = "SCASD",   type=type_data_processing)
 def ia32_strings(obj):
-    if obj.mnemonic[-1]=='D' and obj.misc['opdsz']:
-        obj.mnemonic = obj.mnemonic[:-1]+'W'
+    if obj.mnemonic[-1]=='D':
+        W,R,X,B = getREX(obj)
+        if W==1: # REX superseeds 66 prefix
+            obj.mnemonic = obj.mnemonic[:-1]+'Q'
+        elif obj.misc['opdsz']==16:
+            obj.mnemonic = obj.mnemonic[:-1]+'W'
 
 # 1 operand
 #----------
 
 # imm8:
-@ispec_ia32("16>[ {6a} ib(8) ]", mnemonic = "PUSH",   type=type_data_processing)
 @ispec_ia32("16>[ {cd} ib(8) ]", mnemonic = "INT",    type=type_control_flow)
+def ia32_imm8(obj,ib):
+    obj.operands = [env.cst(ib,8)]
+
+@ispec_ia32("16>[ {6a} ib(8) ]", mnemonic = "PUSH",   type=type_data_processing)
+def ia32_imm8_signed(obj,ib):
+    obj.operands = [env.cst(ib,8).signextend(8)]
+
 @ispec_ia32("16>[ {eb} ib(8) ]", mnemonic = "JMP",    type=type_control_flow)
 @ispec_ia32("16>[ {e2} ib(8) ]", mnemonic = "LOOP",   type=type_control_flow)
 @ispec_ia32("16>[ {e1} ib(8) ]", mnemonic = "LOOPE",  type=type_control_flow)
 @ispec_ia32("16>[ {e0} ib(8) ]", mnemonic = "LOOPNE", type=type_control_flow)
 def ia32_imm_rel(obj,ib):
-    obj.operands = [env.cst(ib,8)]
+    size = obj.misc['adrsz'] or 64
+    obj.operands = [env.cst(ib,8).signextend(size)]
 
-@ispec_ia32("16>[ {e3} cb(8) ]", mnemonic = "JECXZ", type=type_control_flow)
+@ispec_ia32("16>[ {e3} cb(8) ]", mnemonic = "JRCXZ", type=type_control_flow)
 def ia32_cb8(obj,cb):
-    if obj.misc['adrsz']==16: obj.mnemonic = "JCXZ"
-    obj.operands = [env.cst(cb,8)]
+    size = obj.misc['adrsz'] or 64
+    if size==32: obj.mnemonic = "JECXZ"
+    obj.operands = [env.cst(cb,8).signextend(size)]
 
 # imm16:
 @ispec_ia32("24>[ {c2} iw(16) ]", mnemonic = "RETN", type=type_control_flow)
@@ -156,10 +176,12 @@ def ia32_retn(obj,iw):
 # imm16/32:
 @ispec_ia32("*>[ {68} ~data(*) ]", mnemonic = "PUSH", type=type_data_processing)
 def ia32_imm32(obj,data):
-    size = obj.misc['opdsz'] or 64
+    size = obj.misc['opdsz'] or 32
     if data.size<size: raise InstructionError(obj)
     imm = data[0:size]
-    obj.operands = [env.cst(imm.int(),size)]
+    W,R,X,B = getREX(obj)
+    xsize = 64 if W==1 else size
+    obj.operands = [env.cst(imm.int(),size).signextend(xsize)]
     obj.bytes += pack(imm)
 
 @ispec_ia32("*>[ {e8} ~data(*) ]", mnemonic = "CALL", type=type_control_flow)
@@ -181,6 +203,8 @@ def ia32_imm_rel(obj,data):
 @ispec_ia32("*>[ reg(3) 1 1010 ]", mnemonic = "POP")  #58 +rd
 def ia32_rm32(obj,reg):
     size = obj.misc['opdsz'] or 64
+    W,R,X,B = getREX(obj)
+    if W==1: size = 64
     op1 = getregB(obj,reg,size)
     obj.operands = [op1]
     obj.type = type_data_processing
@@ -224,8 +248,6 @@ def ia32_rm8(obj,Mod,RM,data):
 # r/m16/32
 @ispec_ia32("*>[ {ff} /0 ]", mnemonic = "INC"  )
 @ispec_ia32("*>[ {ff} /1 ]", mnemonic = "DEC"  )
-@ispec_ia32("*>[ {ff} /6 ]", mnemonic = "PUSH" )
-@ispec_ia32("*>[ {8f} /0 ]", mnemonic = "POP"  )
 @ispec_ia32("*>[ {f7} /2 ]", mnemonic = "NOT"  )
 @ispec_ia32("*>[ {f7} /3 ]", mnemonic = "NEG"  )
 @ispec_ia32("*>[ {f7} /4 ]", mnemonic = "MUL"  )
@@ -237,12 +259,21 @@ def ia32_rm32(obj,Mod,RM,data):
     obj.operands = [op1]
     obj.type = type_data_processing
 
+@ispec_ia32("*>[ {ff} /6 ]", mnemonic = "PUSH" )
+@ispec_ia32("*>[ {8f} /0 ]", mnemonic = "POP"  )
+def ia32_rm32(obj,Mod,RM,data):
+    W,R,X,B = getREX(obj)
+    op1,data = getModRM(obj,Mod,RM,data,REX=(1,R,X,B))
+    obj.operands = [op1]
+    obj.type = type_data_processing
+
 # r64 no REX prefix needed
 @ispec_ia32("*>[ {ff} /2 ]", mnemonic = "CALL")
 @ispec_ia32("*>[ {ff} /4 ]", mnemonic = "JMP")
 def ia32_rm64(obj,Mod,RM,data):
-    if not obj.misc['REX']: obj.misc['REX']=(1,0,0,0)
-    op1,data = getModRM(obj,Mod,RM,data)
+    obj.misc['opdsz'] = 64
+    REX = obj.misc['REX'] or (1,0,0,0)
+    op1,data = getModRM(obj,Mod,RM,data,REX)
     obj.operands = [op1]
     obj.misc['absolute']=True
     obj.type = type_control_flow
@@ -285,7 +316,8 @@ def ia32_imm_rel(obj,cc,cb):
 def ia32_imm_rel(obj,cc,data):
     obj.cond = CONDITION_CODES[cc]
     size = obj.misc['opdsz'] or 32
-    if size==16: raise InstructionError(obj)
+    if size==16 or data.size<size:
+        raise InstructionError(obj)
     imm = data[0:size]
     op1 = env.cst(imm.int(-1),size)
     op1.sf = True
@@ -300,11 +332,9 @@ def ia32_imm_rel(obj,cc,data):
 @ispec_ia32("8>[ rd(3) 0 1001 ]", mnemonic = "XCHG") # 9x
 def ia32_xchg(obj,rd):
     size = obj.misc['opdsz'] or 32
-    REX = obj.misc['REX']
-    if REX:
-        W,R,X,B = REX
-        if W==1: size=64
-        if R==1: rd = (R<<3)+rd
+    W,R,X,B = getREX(obj)
+    if W==1: size=64
+    if R==1: rd = (R<<3)+rd
     op1 = env.getreg(0,size)
     op2 = env.getreg(rd,size)
     obj.operands = [op1, op2]
@@ -338,7 +368,6 @@ def ia32_mov_adr(obj,data,_flg8,_inv):
     if seg is None: seg=''
     if data.size<adrsz: raise InstructionError(obj)
     moffs8 = env.cst(data[0:adrsz].int(),adrsz)
-    moffs8.sf = True
     op2 = env.mem(moffs8,opdsz,seg)
     obj.operands = [op1, op2] if not _inv else [op2, op1]
     obj.bytes += pack(data[0:adrsz])
@@ -356,10 +385,8 @@ def ia32_mov_adr(obj,data,_flg8,_inv):
 @ispec_ia32("*>[ {a9} ~data(*) ]", mnemonic = "TEST")
 def ia32_eax_imm(obj,data):
     size = immsz = obj.misc['opdsz'] or 32
-    REX = obj.misc['REX']
-    if REX:
-        W,R,X,B = REX
-        if W==1: size=64
+    W,R,X,B = getREX(obj)
+    if W==1: size=64
     if data.size<immsz: raise InstructionError(obj)
     imm = data[0:immsz]
     if size==64: op1 = env.rax
@@ -428,9 +455,7 @@ def ia32_ptr_ib(obj,Mod,RM,data):
 @ispec_ia32("*>[ {c0} /7 ]", mnemonic = "SAR")
 def ia32_ptr_ib(obj,Mod,RM,data):
     obj.misc['opdsz']=8
-    REX = obj.misc['REX']
-    W=0
-    if REX: W=REX[0]
+    W,R,X,B = getREX(obj)
     op1,data = getModRM(obj,Mod,RM,data)
     if data.size<8: raise InstructionError(obj)
     imm = data[0:8]
@@ -449,11 +474,9 @@ def ia32_mov_adr(obj,rb,ib):
 @ispec_ia32("*>[ rb(3) 1 1101 ~data(*) ]", mnemonic = "MOV") # b8+rd  id/io
 def ia32_mov_adr(obj,rb,data):
     size = obj.misc['opdsz'] or 32
-    REX = obj.misc['REX']
-    if REX:
-        W,R,X,B = REX
-        if W==1: size=64
-        if B==1: rb = (B<<3)+rb
+    W,R,X,B = getREX(obj)
+    if W==1: size=64
+    if B==1: rb = (B<<3)+rb
     op1 = env.getreg(rb,size)
     if data.size<size: raise InstructionError(obj)
     imm = data[0:size]
@@ -472,9 +495,7 @@ def ia32_mov_adr(obj,rb,data):
 @ispec_ia32("*>[ {c1} /6 ]", mnemonic = "SHL")
 @ispec_ia32("*>[ {c1} /7 ]", mnemonic = "SAR")
 def ia32_rm32_imm8(obj,Mod,RM,data):
-    REX = obj.misc['REX']
-    W=0
-    if REX: W=REX[0]
+    W,R,X,B = getREX(obj)
     op1,data = getModRM(obj,Mod,RM,data)
     if data.size<8: raise InstructionError(obj)
     imm = data[0:8]
@@ -505,7 +526,7 @@ def ia32_rm32_op2(obj,Mod,RM,data,_op2):
     obj.operands = [op1, _op2]
     obj.type = type_data_processing
 
-# r/m16/32 , imm16/32
+# r/m16/32/64 , imm16/32
 @ispec_ia32("*>[ {81} /0 ]", mnemonic = "ADD")
 @ispec_ia32("*>[ {81} /1 ]", mnemonic = "OR")
 @ispec_ia32("*>[ {81} /2 ]", mnemonic = "ADC")
@@ -518,9 +539,9 @@ def ia32_rm32_op2(obj,Mod,RM,data,_op2):
 @ispec_ia32("*>[ {f7} /0 ]", mnemonic = "TEST")
 def ia32_ptr_iwd(obj,Mod,RM,data):
     op1,data = getModRM(obj,Mod,RM,data)
-    REX = obj.misc['REX']
+    W,R,X,B = getREX(obj)
     size = op1.size
-    if REX: size=32
+    if W==1: size=32
     if data.size<size: raise InstructionError(obj)
     imm = data[0:size]
     x = env.cst(imm.int(),size).signextend(op1.size)
@@ -613,15 +634,10 @@ def ia32_arpl(obj,Mod,REG,RM,data,_inv):
 
 @ispec_ia32("*>[ {63} /r ]", mnemonic = "MOVSXD")
 def ia32_movsxd(obj,Mod,REG,RM,data):
-    REX = obj.misc['REX']
-    if REX: W,R,X,B = REX
-    else:   W=0
     op1 = getregR(obj,REG,64)
-    # force 32-bit wide op2
-    if W==1: obj.misc['REX'] = (0,R,X,B)
-    op2,data = getModRM(obj,Mod,RM,data)
-    # restore original W
-    if W==1: obj.misc['REX'] = (1,R,X,B)
+    # force REX.W=0 for op2 decoding:
+    W,R,X,B = getREX(obj)
+    op2,data = getModRM(obj,Mod,RM,data,REX=(0,R,X,B))
     obj.operands = [op1, op2]
     obj.type = type_data_processing
 
@@ -721,14 +737,16 @@ def ia32_reg_rm_8(obj,Mod,RM,REG,data):
     obj.bytes += pack(imm)
     obj.type = type_data_processing
 
-# r16/32, r/m16/32, imm16/32
+# r16/32/64, r/m16/32/64, imm16/32
 @ispec_ia32("*>[ {69} /r ]", mnemonic = "IMUL")
 def ia32_reg_rm_wd(obj,Mod,RM,REG,data):
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = getregR(obj,REG,op2.size)
-    if data.size<op2.size: raise InstructionError(obj)
-    imm = data[0:op2.size]
-    x = env.cst(imm.int(),op2.size)
+    sz = op2.size
+    if sz == 64: sz = 32
+    if data.size<sz: raise InstructionError(obj)
+    imm = data[0:sz]
+    x = env.cst(imm.int(),sz).signextend(op2.size)
     obj.operands = [op1, op2, x]
     obj.bytes += pack(imm)
     obj.type = type_data_processing
@@ -748,12 +766,10 @@ def ia32_cmpxchg(obj,Mod,RM,data):
     op2,data = getModRM(obj,Mod,RM,data)
     if not op2._is_mem: raise InstructionError(obj)
     op2.size = 64
-    REX = obj.misc['REX']
-    if REX:
-        W=REX[0]
-        if W==1:
-            obj.mnemonic = "CMPXCHG16B"
-            op2.size = 128
+    W,R,X,B = getREX(obj)
+    if W==1:
+        obj.mnemonic = "CMPXCHG16B"
+        op2.size = 128
     obj.operands = [op2]
     obj.type = type_data_processing
 
@@ -840,11 +856,9 @@ def ia32_ADC_eax_imm(obj,ib):
 @ispec_ia32("*>[ {0f}{bf} /r ]", mnemonic = "MOVSX", _flg8=False)
 def ia32_movx(obj,Mod,RM,REG,data,_flg8):
     size = obj.misc['opdsz'] or 32
-    REX = obj.misc['REX']
-    if REX:
-        W,R,X,B = REX
-        if W==1: size=64
-        if R==1: REG = (R<<3)+REG
+    W,R,X,B = getREX(obj)
+    if W==1: size=64
+    if R==1: REG = (R<<3)+REG
     op1 = env.getreg(REG,size)
     obj.misc['opdsz']=8 if _flg8 else 16
     op2,data = getModRM(obj,Mod,RM,data)

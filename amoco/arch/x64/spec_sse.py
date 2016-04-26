@@ -45,7 +45,7 @@ def sse_ps(obj,Mod,REG,RM,data):
     obj.type = type_data_processing
 
 # xmm/mmx, xmm/m64
-@ispec_ia32("*>[ {0f}{2a} /r ]", mnemonic="CVTPS2PD", _op1sz=128)
+@ispec_ia32("*>[ {0f}{5a} /r ]", mnemonic="CVTPS2PD", _op1sz=128)
 @ispec_ia32("*>[ {0f}{2c} /r ]", mnemonic="CVTTPS2PI", _op1sz='mm')
 @ispec_ia32("*>[ {0f}{2d} /r ]", mnemonic="CVTPS2PI", _op1sz='mm')
 def sse_ps(obj,Mod,REG,RM,data,_op1sz):
@@ -122,7 +122,7 @@ def sse_ps(obj,Mod,REG,RM,data):
 @ispec_ia32("*>[ {0f}{6e} /r ]", mnemonic="MOVD", _inv=False)
 @ispec_ia32("*>[ {0f}{7e} /r ]", mnemonic="MOVD", _inv=True)
 def sse_pd(obj,Mod,REG,RM,data, _inv):
-    if not check_nopfx(obj,set_opdsz_64): raise InstructionError(obj)
+    if not check_nopfx(obj,set_opdsz_32): raise InstructionError(obj)
     REX = obj.misc['REX']
     if REX is not None:
         W,R,X,B = REX
@@ -344,7 +344,7 @@ def sse_pd(obj,Mod,REG,RM,data,_inv):
 # xmm, xmm/m128
 @ispec_ia32("*>[ {0f}{7c} /r ]", mnemonic="HADDPS")
 @ispec_ia32("*>[ {0f}{7d} /r ]", mnemonic="HSUBPS")
-@ispec_ia32("*>[ {0f}{e6} /r ]", mnemonic="CVTPD2PQ")
+@ispec_ia32("*>[ {0f}{e6} /r ]", mnemonic="CVTPD2DQ")
 def sse_ps(obj,Mod,REG,RM,data):
     if not check_f2(obj,set_opdsz_128): raise InstructionError(obj)
     op2,data = getModRM(obj,Mod,RM,data)
@@ -398,7 +398,11 @@ def sse_sd(obj,Mod,REG,RM,data):
 # xmm, r/m32
 @ispec_ia32("*>[ {0f}{2a} /r ]", mnemonic="CVTSI2SD")
 def sse_sd(obj,Mod,REG,RM,data):
-    if not check_f2(obj,set_opdsz_64): raise InstructionError(obj)
+    if not check_f2(obj,set_opdsz_32): raise InstructionError(obj)
+    REX = obj.misc['REX']
+    if REX is not None:
+        W,R,X,B = REX
+        if W==1: set_opdsz_64(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = getregR(obj,REG,128)
     obj.operands = [op1,op2]
@@ -497,7 +501,7 @@ def sse_pd(obj,Mod,REG,RM,data,_op2sz):
     if not check_f3(obj,set_opdsz_128): raise InstructionError(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     if op2._is_mem: op2.size = _op2sz
-    op1 = getregR(obj,REG,op2.size)
+    op1 = getregR(obj,REG,128)
     obj.operands = [op1,op2]
     obj.type = type_data_processing
 
@@ -528,7 +532,11 @@ def sse_sd(obj,Mod,REG,RM,data):
 # xmm, r/m32
 @ispec_ia32("*>[ {0f}{2a} /r ]", mnemonic="CVTSI2SS")
 def sse_sd(obj,Mod,REG,RM,data):
-    if not check_f3(obj,set_opdsz_64): raise InstructionError(obj)
+    if not check_f3(obj,set_opdsz_32): raise InstructionError(obj)
+    REX = obj.misc['REX']
+    if REX is not None:
+        W,R,X,B = REX
+        if W==1: set_opdsz_64(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = getregR(obj,REG,128)
     obj.operands = [op1,op2]
@@ -538,7 +546,7 @@ def sse_sd(obj,Mod,REG,RM,data):
 @ispec_ia32("*>[ {0f}{2c} /r ]", mnemonic="CVTTSS2SI")
 @ispec_ia32("*>[ {0f}{2d} /r ]", mnemonic="CVTSS2SI")
 def sse_sd(obj,Mod,REG,RM,data):
-    if not check_f2(obj,set_opdsz_128): raise InstructionError(obj)
+    if not check_f3(obj,set_opdsz_128): raise InstructionError(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     if op2._is_mem: op2.size = 32
     op1 = getregRW(obj,REG,32)
@@ -582,6 +590,7 @@ def sse_sd(obj,Mod,REG,RM,data):
 @ispec_ia32("*>[ {0f}{6a} /r ]", mnemonic="PUNPCKHDQ")
 @ispec_ia32("*>[ {0f}{6b} /r ]", mnemonic="PACKSSDW")
 @ispec_ia32("*>[ {0f}{6c} /r ]", mnemonic="PUNPCKLQDQ")
+@ispec_ia32("*>[ {0f}{6d} /r ]", mnemonic="PUNPCKHQDQ")
 @ispec_ia32("*>[ {0f}{6f} /r ]", mnemonic="MOVDQA")
 @ispec_ia32("*>[ {0f}{74} /r ]", mnemonic="PCMPEQB")
 @ispec_ia32("*>[ {0f}{75} /r ]", mnemonic="PCMPEQW")
@@ -754,7 +763,7 @@ def sse_pd(obj,Mod,REG,RM,data,_inv):
 
 # xmm, mmx/m64
 @ispec_ia32("*>[ {0f}{2a} /r ]", mnemonic="CVTPI2PD")
-def sse_pd(obj,Mod,REG,RM,data,_inv):
+def sse_pd(obj,Mod,REG,RM,data):
     if not check_66(obj,set_opdsz_mm): raise InstructionError(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = getregR(obj,REG,128)
@@ -765,13 +774,11 @@ def sse_pd(obj,Mod,REG,RM,data,_inv):
 # xmm, r/m32, imm8
 # r/m32, xmm, imm8
 @ispec_ia32("*>[ {0f}{3a}{14} /r ]", mnemonic="PEXTRB", _inv=True)
-@ispec_ia32("*>[ {0f}{c4}     /r ]", mnemonic="PINSRW", _inv=False)
-@ispec_ia32("*>[ {0f}{c5}     /r ]", mnemonic="PEXTRW", _inv=False)
 @ispec_ia32("*>[ {0f}{3a}{15} /r ]", mnemonic="PEXTRW", _inv=True)
 @ispec_ia32("*>[ {0f}{3a}{16} /r ]", mnemonic="PEXTRD", _inv=True)
 @ispec_ia32("*>[ {0f}{3a}{17} /r ]", mnemonic="EXTRACTPS", _inv=True)
 @ispec_ia32("*>[ {0f}{3a}{20} /r ]", mnemonic="PINSRB", _inv=False)
-@ispec_ia32("*>[ {0f}{3a}{21} /r ]", mnemonic="INSERTPS", _inv=False)
+@ispec_ia32("*>[ {0f}{c4}     /r ]", mnemonic="PINSRW", _inv=False)
 @ispec_ia32("*>[ {0f}{3a}{22} /r ]", mnemonic="PINSRD", _inv=False)
 def sse_pd(obj,Mod,REG,RM,data,_inv):
     if not check_66(obj,set_opdsz_64): raise InstructionError(obj)
@@ -784,6 +791,38 @@ def sse_pd(obj,Mod,REG,RM,data,_inv):
             else: op2.size=16
     op1 = getregR(obj,REG,128)
     obj.operands = [op1,op2] if not _inv else [op2,op1]
+    if data.size<8: raise InstructionError(obj)
+    imm = data[0:8]
+    obj.operands.append(env.cst(imm.int(),8))
+    obj.bytes += pack(imm)
+    obj.type = type_data_processing
+
+@ispec_ia32("*>[ {0f}{c5}     /r ]", mnemonic="PEXTRW", _inv=False)
+def sse_pd(obj,Mod,REG,RM,data,_inv):
+    if not check_66(obj,set_opdsz_128): raise InstructionError(obj)
+    op2,data = getModRM(obj,Mod,RM,data)
+    if op2._is_mem:
+        if   obj.mnemonic[-1]=='B':
+            op2.size=8
+        elif obj.mnemonic[-1]=='W':
+            if _inv: raise InstructionError(obj)
+            else: op2.size=16
+    op1 = getregR(obj,REG,64)
+    obj.operands = [op1,op2] if not _inv else [op2,op1]
+    if data.size<8: raise InstructionError(obj)
+    imm = data[0:8]
+    obj.operands.append(env.cst(imm.int(),8))
+    obj.bytes += pack(imm)
+    obj.type = type_data_processing
+
+@ispec_ia32("*>[ {0f}{3a}{21} /r ]", mnemonic="INSERTPS")
+def sse_pd(obj,Mod,REG,RM,data):
+    if not check_66(obj,set_opdsz_128): raise InstructionError(obj)
+    op1 = getregR(obj,REG,128)
+    op2,data = getModRM(obj,Mod,RM,data)
+    if op2._is_mem:
+        op2.size=64
+    obj.operands = [op1,op2]
     if data.size<8: raise InstructionError(obj)
     imm = data[0:8]
     obj.operands.append(env.cst(imm.int(),8))
@@ -850,7 +889,7 @@ def sse_pd(obj,Mod,RM,data):
 @ispec_ia32("*>[ {0f}{6e} /r ]", mnemonic="MOVD", _inv=False)
 @ispec_ia32("*>[ {0f}{7e} /r ]", mnemonic="MOVD", _inv=True)
 def sse_pd(obj,Mod,REG,RM,data, _inv):
-    if not check_66(obj,set_opdsz_64): raise InstructionError(obj)
+    if not check_66(obj,set_opdsz_32): raise InstructionError(obj)
     op2,data = getModRM(obj,Mod,RM,data)
     op1 = getregR(obj,REG,128)
     obj.operands = [op1,op2] if not _inv else [op2,op1]

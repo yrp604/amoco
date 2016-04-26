@@ -97,15 +97,16 @@ class lsweep(object):
             n = self.G.add_vertex(n)
             b = n.data
             # find its links:
-            if b.misc['func_call']:
+            if b.misc[code.tag.FUNC_CALL]:
                 aret = b.misc['retto']+0
                 nret = D.get(aret,None) or self.G.get_with_address(aret)
                 if nret is not None:
                     e = cfg.link(n,nret)
                     self.G.add_edge(e)
                     ato  = b.misc['to']
-                    if ato is not 0: C[ato+0].append((e,'func_call'))
-            elif b.misc['func_goto'] and b.misc['to'] is not 0:
+                    if ato is not 0 and b.misc[code.tag.FUNC_CALL]>0:
+                        C[ato+0].append((e,code.tag.FUNC_CALL))
+            elif b.misc[code.tag.FUNC_GOTO] and b.misc['to'] is not 0:
                 ato = b.misc['to']+0
                 nto = D.get(ato,None) or self.G.get_with_address(ato)
                 if nto is not None:
@@ -128,7 +129,7 @@ class lsweep(object):
             n = cfg.node(next(self.iterblocks(ato)))
             n = self.G.add_vertex(n)
             for (p,why) in L:
-                if why is 'func_call':
+                if why is code.tag.FUNC_CALL:
                     if n.data.misc['callers']:
                         n.data.misc['callers'].append(p)
                     else:
@@ -153,6 +154,18 @@ class lsweep(object):
 
 # -----------------------------------------------------------------------------
 class _target(object):
+    ''' Candidate for extending a CFG.
+
+    A _target is an internal object used during CFG reconstruction to point
+    to addresses that are candidates for extending the CFG with either new edge
+    or new basic block.
+
+    Attributes:
+       cst (exp): the targeted address expression
+       parent (node): the basic block that targets this address
+       econd (exp): the conditional expression by which the execution would
+                    proceed from parent to the basic block at this address
+    '''
     def __init__(self,cst,parent,econd=None):
         self.cst = cst
         self.parent = parent
@@ -187,6 +200,13 @@ class _target(object):
     def __eq__(self,t):
         return (self.cst==t.cst and self.parent==t.parent)
 
+    def __repr__(self):
+        pfx = 'dirty ' if self.dirty else ''
+        cnd = [str(x) for x in (self.econd or [])]
+        parent = self.parent
+        if parent is not None: parent = parent.name
+        return '<%s_target %s by %s %s>'%(pfx,self.cst,parent,cnd)
+
 
 # -----------------------------------------------------------------------------
 # fast forward based analysis:
@@ -199,10 +219,6 @@ class fforward(lsweep):
         self.spool = [_target(loc,None)]
 
     def update_spool(self,vtx,parent):
-        if vtx is None: return
-        # if vtx was visited before targets have been added already:
-        if len(vtx.e_out())>0 or vtx in (s.parent for s in self.spool):
-            return
         T = self.get_targets(vtx,parent)
         if len(T)>0:
             if vtx.data.misc['tbc']:
@@ -251,6 +267,9 @@ class fforward(lsweep):
             vtx = self.G.add_vertex(vtx)
         return vtx
 
+    def check_func(self,vtx):
+        pass
+
     def check_ext_target(self,t):
         if t.cst is None: return False
         if t.cst._is_ext:
@@ -259,14 +278,17 @@ class fforward(lsweep):
             e = cfg.link(t.parent,vtx,data=t.econd)
             e = t.parent.c.add_edge(e)
             self.update_spool(e.v[1],t.parent)
+            self.check_func(e.v[1])
             return True
         return False
 
-    def getcfg(self,loc=None):
+    def getcfg(self,loc=None,debug=False):
+        if debug: import pdb
         try:
-            for x in self.itercfg(loc): pass
+            for x in self.itercfg(loc):
+                if debug: pdb.set_trace()
         except KeyboardInterrupt:
-            pass
+            if debug: pdb.set_trace()
         return self.G
 
     # generic 'forward' analysis explorer.
@@ -283,30 +305,32 @@ class fforward(lsweep):
         # proceed with exploration of every spool element:
         while len(self.spool)>0:
             t = self.spool.pop(order)
-            if t.dirty: continue
             parent = t.parent
             econd  = t.econd
             if self.check_ext_target(t):
                 continue
             for b in self.iterblocks(loc=t.cst):
                 vtx = G.get_by_name(b.name) or cfg.node(b)
-                b = vtx.data
+                do_update = (vtx not in G)
                 # if block is a FUNC_START, we add it as a new graph component (no link to parent),
                 # otherwise we add the new (parent,vtx) edge.
                 if parent is None:
                     self.add_root_node(vtx)
-                elif parent.data.misc[code.tag.FUNC_CALL]:
+                elif parent.data.misc[code.tag.FUNC_CALL]>0:
                     vtx = self.add_call_node(vtx,parent,econd)
                 else:
-                    e = cfg.link(parent,vtx,data=econd)
-                    e = G.add_edge(e)
-                    if e is not None:
+                    e_ = cfg.link(parent,vtx,data=econd)
+                    e  = G.add_edge(e_)
+                    if e is e_:
                         logger.verbose('edge %s added'%e)
                 # now we try to populate spool with target addresses of current block:
-                self.update_spool(vtx,parent)
+                if do_update:
+                    self.update_spool(vtx,parent)
+                self.check_func(vtx)
                 yield vtx
-                if not lazy or b.misc[code.tag.FUNC_END]: break
-                logger.verbose("lsweep fallback at %s"%b.name)
+                if (not do_update or not lazy or
+                   vtx.data.misc[code.tag.FUNC_END]): break
+                logger.verbose("lsweep fallback at %s"%vtx.data.name)
                 parent = vtx
                 econd  = None
 
@@ -384,83 +408,68 @@ class fbackward(lforward):
 
 # -----------------------------------------------------------------------------
 # link backward based analysis:
-# a generalisation of link forward where pc is evaluated by evaluating all paths
+# a generalisation of link forward where pc is evaluated by considering all paths
 # that link to the current node.
 class lbackward(fforward):
-    policy = {'depth-first': False, 'branch-lazy': False, 'frame-aliasing':False}
+    policy = {'depth-first': False, 'branch-lazy': False, 'frame-aliasing':False,
+              'complexity': 30}
 
-    def update_spool(self,vtx,parent):
-        if vtx is None: return
-        root = vtx.c.sV[0]
-        if root.data.misc['func']: return
-        T = self.get_targets(vtx,parent)
+    def check_func(self,node):
+        for t in self.spool:
+            if t.parent in node.c:
+                return
+        # create func object:
+        f = code.func(node.c)
+        alf = code.mapper.assume_no_aliasing
+        code.mapper.assume_no_aliasing = not self.policy['frame-aliasing']
+        m = f.makemap()
+        # get pc @ node:
+        pc = self.prog.cpu.PC()
+        mpc = m(pc)
+        T = _target(mpc,node).expand()
+        # if a target is defined here, it means that func cfg is not completed
+        # so we can return now :
         if len(T)>0:
-            #self.spool.extend(filter(lambda t:t not in self.spool,T))
-            self.spool.extend(T)
-            return
-        err = '%s analysis stopped at node %s'%(self.__class__.__name__,vtx.name)
-        logger.info(err)
-        vtx.data.misc['tbc'] = 1
+            logger.verbose('extending cfg of %s (new target found)'%f)
+            for t in T:
+                for k,v in f.misc['heads'].iteritems():
+                    if v(pc)==t.cst: t.parent = k
+        else:
+            logger.info('lbackward: function %s done'%f)
+            f.map = m
+            self.prog.codehelper(func=f)
+            mpc = f.map(pc)
+            roots = f.view.layout.layers[0]
+            if len(roots)>1:
+                logger.verbose('lbackward: multiple entries into function %s ?!'%f)
+            assert len(roots)>0
+            nroot = roots[0]
+            nroot.data.misc['func'] = f
+            try:
+                fsym = nroot.data.misc['callers'][0].data.misc['to'].ref
+            except (IndexError,TypeError,AttributeError):
+                fsym = 'f'
+            f.name = "%s:%s"%(fsym,nroot.name)
+            for cn in nroot.data.misc['callers']:
+                cnpc = cn.data.map(mpc)
+                fn = cfg.node(f)
+                e = cn.c.add_edge(cfg.link(cn,fn))
+                logger.verbose('edge %s added'%str(e))
+                T.extend(_target(cnpc,e.v[1]).expand())
+        code.mapper.assume_no_aliasing = alf
+        self.spool.extend(T)
 
     def get_targets(self,node,parent):
         pc = self.prog.cpu.PC()
         alf = code.mapper.assume_no_aliasing
+        cxl = code.op.threshold
+        code.op.limit(self.policy['complexity'])
         code.mapper.assume_no_aliasing = not self.policy['frame-aliasing']
-        # try fforward first:
-        T = fforward.get_targets(self,node,parent)
-        if len(T)>0:
-            code.mapper.assume_no_aliasing = alf
-            return T
-        # create func object:
-        f = code.func(node.c)
-        m = f.backward(node)
-        if m is None:
-            logger.verbose('dead end at %s'%node.name)
-        else:
-            m = m.use((pc,f.address))
-            # get pc @ node:
-            mpc = m(pc)
-            T = _target(mpc,node).expand()
-            # if a target is defined here, it means that func cfg is not completed
-            # so we can return now :
-            if len(T)>0:
-                code.mapper.assume_no_aliasing = alf
-                return T
-        # otherwise if func cfg is complete compute pc out of function callers:
-        xpc = []
-        # check if a leaf is still going to be explored
-        for x in f.cfg.leaves():
-            if x in (s.parent for s in self.spool):
-                code.mapper.assume_no_aliasing = alf
-                return xpc
-        # f is now fully explored so we can "return" to callers:
-        logger.info('lbackward: function %s done'%f)
-        # cleanup spool:
-        for t in self.spool:
-            if t.parent.c is f.cfg: t.dirty=True
-        # if needed compute the full map:
-        if f.misc['partial']: m = f.makemap()
-        f.map = m
-        self.prog.codehelper(func=f)
-        mpc = f.map(pc)
-        roots = filter(lambda n: n.data.misc[code.tag.FUNC_START],f.cfg.sV)
-        if len(roots)<=0:
-            code.mapper.assume_no_aliasing = alf
-            return xpc
-        if len(roots)>1:
-            logger.verbose('lbackward: multiple entries into function %s ?!'%f)
-        nroot = roots[0]
-        nroot.data.misc['func'] = f
-        try:
-            fsym = nroot.data.misc['callers'][0].data.misc['to'].ref
-        except (IndexError,TypeError,AttributeError):
-            fsym = 'f'
-        f.name = "%s:%s"%(fsym,nroot.name)
-        for cn in nroot.data.misc['callers']:
-            cnpc = cn.data.map.use((pc,cn.data.address))(mpc)
-            fn = cfg.node(f)
-            e = cn.c.add_edge(cfg.link(cn,fn))
-            xpc.extend(_target(cnpc,e.v[1]).expand())
+        # make pc value explicit in every block:
+        node.data.map = node.data.map.use((pc,node.data.address))
+        # try fforward:
+        T = super(lbackward,self).get_targets(node,parent)
         code.mapper.assume_no_aliasing = alf
-        return xpc
+        code.op.limit(cxl)
+        return T
 

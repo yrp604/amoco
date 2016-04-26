@@ -10,7 +10,7 @@ logger = Log(__name__)
 
 from bisect import bisect_left
 
-from amoco.cas.expressions import top
+from amoco.cas.expressions import exp,top
 
 #------------------------------------------------------------------------------
 # datadiv provides the API for manipulating data values extracted from memory.
@@ -154,10 +154,11 @@ class mo(object):
 
 #------------------------------------------------------------------------------
 class MemoryZone(object):
-    __slot__ = ['rel','_map','__cache']
+    __slot__ = ['rel','_map','__cache','__dead']
 
     def __init__(self,rel=None,D=None):
         self.rel = rel
+        self.__dead = False
         self._map = []
         self.__cache = [] # speedup locate method
         if D != None and isinstance(D,dict):
@@ -187,15 +188,17 @@ class MemoryZone(object):
 
     # read l bytes starting at vaddr.
     # return value is a list of datadiv values, unmapped areas
-    # are returned as 'top' expressions.
+    # are returned as 'void' expressions : top if zone is marked as 'dead'
+    # or bottom otherwise.
     def read(self,vaddr,l):
+        void = top if self.__dead else exp
         res = []
         i = self.locate(vaddr)
         if i is None:
-            if len(self._map)==0: return [top(l*8)]
+            if len(self._map)==0: return [void(l*8L)]
             v0 = self._map[0].vaddr
-            if (vaddr+l)<=v0: return [top(l*8)]
-            res.append(top((v0-vaddr)*8))
+            if (vaddr+l)<=v0: return [void(l*8L)]
+            res.append(void((v0-vaddr)*8L))
             l = (vaddr+l)-v0
             vaddr = v0
             i = 0
@@ -204,14 +207,14 @@ class MemoryZone(object):
             try:
                 data,ll = self._map[i].read(vaddr,ll)
             except IndexError:
-                res.append(top(ll*8))
-                ll=0
+                res.append(void(ll*8L))
+                ll=0L
                 break
             if data is None:
                 vi = self.__cache[i]
                 if vaddr < vi:
                     l = min(vaddr+ll,vi)-vaddr
-                    data = top(l*8)
+                    data = void(l*8L)
                     ll -= l
                     i -=1
             if data is not None:
@@ -222,7 +225,11 @@ class MemoryZone(object):
         return res
 
     # write data at address vaddr in map
-    def write(self,vaddr,data,res=False):
+    def write(self,vaddr,data,res=False,dead=False):
+        if dead:
+            self._map = []
+            self._cache = []
+            self.__dead = dead
         self.addtomap(mo(vaddr,data))
         if res is True: self.restruct()
 
@@ -280,6 +287,24 @@ class MemoryZone(object):
         self._map = m
         self.__update_cache()
 
+    def shift(self,offset):
+        for z in self._map:
+            z.vaddr += offset
+        self.__update_cache()
+
+    def grep(self,pattern):
+        import re
+        g = re.compile(pattern)
+        res = []
+        for z in self._map:
+            if z.data._is_raw:
+                off=0
+                for s in g.findall(z.data.val):
+                    off = z.data.val.index(s,off)
+                    res.append(z.vaddr+off)
+                    off += len(s)
+        return res
+
 #------------------------------------------------------------------------------
 class MemoryMap(object):
     __slot__ = ['_zones','perms']
@@ -320,16 +345,6 @@ class MemoryMap(object):
     def __str__(self):
         return '\n'.join(map(str,self._zones.values()))
 
-    # getitem allows to use a MemoryMap object as if it was a string on which
-    # some slice lookups are performed. This is typically the case of the API
-    # required by arch/disasm "disassemble" and "getsequence" methods.
-    def __getitem__(self,aslc):
-        address,end = aslc.start,aslc.stop
-        l = end-address
-        r,o = self.reference(address)
-        item = self._zones[r].read(o,l)[0]
-        return item
-
     def read(self,address,l):
         r,o = self.reference(address)
         if r in self._zones:
@@ -337,14 +352,22 @@ class MemoryMap(object):
         else:
             raise MemoryError(address)
 
-    def write(self,address,expr):
+    def write(self,address,expr,deadzone=False):
         r,o = self.reference(address)
         if not r in self._zones:
             self.newzone(r)
-        self._zones[r].write(o,expr)
+        self._zones[r].write(o,expr,deadzone)
 
     def restruct(self):
         for z in self._zones.itervalues(): z.restruct()
+
+    def grep(self,pattern):
+        res = []
+        for z in self._zones.values():
+            zres = z.grep(pattern)
+            if z.rel is not None: zres = [z.rel+r for r in zres]
+            res.extend(zres)
+        return res
 
 #------------------------------------------------------------------------------
 class CoreExec(object):

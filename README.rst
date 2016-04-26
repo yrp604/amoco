@@ -1,6 +1,10 @@
 =====
 Amoco
 =====
+
+.. image:: https://travis-ci.org/bdcht/amoco.svg?branch=release
+    :target: https://travis-ci.org/bdcht/amoco
+
 +-----------+-----------------------------------+
 | Status:   | Under Development                 |
 +-----------+-----------------------------------+
@@ -88,7 +92,7 @@ Amoco is tested on python 2.7 and depends on the following python packages:
 - grandalf_ used for building CFG (and eventually rendering it)
 - crysp_    used by the generic intruction decoder (``arch/core.py``)
 - z3_       used to simplify expressions and solve constraints
-- pygments_ (not in current release, planned for 2.4.2 release)
+- pygments_ used for pretty printing of assembly code and expressions
 - pyparsing_ for parsing instruction decoder formats
 - ply_ (optional), for parsing *GNU as* files
 - zodb_ (optional), provides persistence of amoco objects in a database
@@ -99,10 +103,10 @@ Quickstart
 
 Below is a very simple example where basic blocks are build with linear sweep:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> import amoco
- >>> p = amoco.system.loader.load_program('tests/samples/flow.elf')
+ >>> p = amoco.system.loader.load_program('tests/samples/x86/flow.elf')
  amoco.system.loader: INFO: Elf32 file detected
  amoco.system.loader: INFO: linux_x86 program created
  >>> p
@@ -115,7 +119,7 @@ and target platform and provide some feedback info. Here the loader
 creates a ``linux_x86.ELF`` object which shall represent the program task.
 
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> p.bin
  <amoco.system.elf.Elf32 object at 0xb721a48c>
@@ -145,7 +149,7 @@ are modeled as abstract expressions of type ``ext``. Note also that fetching
 compound data (symbolic+concrete) is possible. See MemoryZone_ for more details.
 Lets proceed with getting some basic blocks...
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> z = amoco.lsweep(p)
  >>> ib = z.iterblocks()
@@ -196,7 +200,7 @@ as absolute addresses (indicated by the \* prefix).
 
 Lets look at the symbolic execution of this block:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> b.map
  <amoco.cas.mapper.mapper object at 0x9cba3ec>
@@ -234,7 +238,7 @@ interpretation of this block.
 A mapper object is now also equipped with a MemoryMap to mitigate aliasing issues
 and ease updating the global mmap state.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print b.map.memory()
  <MemoryZone rel=None :>
@@ -269,7 +273,7 @@ Lets try a (little) more elaborated analysis that will not only allow to
 build a list of basic blocks but will also help us discover (parts of)
 the control flow graph of the program:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> ff = amoco.fforward(p)
  >>> ff.policy
@@ -290,7 +294,7 @@ has been followed thanks to a ``@stub`` defined for this external (see ``system/
 
 Let's have a look at the graph instance:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print G.C[0].sV
  0.| <node [0x8048380] at 0x8db764c>
@@ -315,7 +319,7 @@ it cannot know that this location holds this address.
 A little more elaborated analysis like **link-forward** would have started analysing
 ``#main``:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> lf = amoco.lforward(p)
  >>> lf.getcfg()
@@ -371,7 +375,7 @@ A little more elaborated analysis like **link-forward** would have started analy
 The **fast-backward** is another analysis that tries to evaluate the expression of
 the program counter backwardly and thus reconstructs function frames in simple cases.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> amoco.Log.loggers['amoco.main'].setLevel(15)
  >>> z = amoco.fbackward(p)
@@ -462,7 +466,7 @@ The ``v8/spec_armv8.py`` module implements all decoding specifications thanks
 to an original decorating mechanism. For example, the EXTR instruction encoding
 is defined like this:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  @ispec("32[ sf 0 0 100111 N 0 Rm(5) imms(6) Rn(5) Rd(5) ]",mnemonic="EXTR")
  def A64_EXTR(obj,sf,N,Rm,imms,Rn,Rd):
@@ -489,7 +493,7 @@ If you look at page 480 of armv8_, you will likely feel at home...
 The same is true for ``x86/spec_ia32.py`` and the Intel manuals, for example
 the CMOVcc instruction(s) specification is:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  # conditionals:
  @ispec_ia32("*>[ {0f} cc(4) 0010 /r ]", mnemonic = "CMOVcc") # 0f 4x /r
@@ -527,7 +531,7 @@ will find its semantics definition by looking for a function ``i_XXX(i,fmap): ..
 
 For example (in ``arch/x86/asm.py``):
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  def i_CMOVcc(i,fmap):
      fmap[eip] = fmap(eip)+i.length
@@ -554,7 +558,7 @@ concatenated to produce the output string.
 
 An example follows from ``arch/x86/formats.py``:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  def mnemo(i):
      mnemo = i.mnemonic.replace('cc','')
@@ -581,7 +585,7 @@ The formatter is also used to take care of aliasing instructions like for exampl
 in the arm architectures where the *ANDS* instruction is replaced by *TST* when
 the destination register is X0/W0 :
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  def alias_AND(i):
      m = mnemo(i)
@@ -641,7 +645,7 @@ Constants
 
 Some examples of ``cst`` and ``sym`` expressions follow:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> from amoco.cas.expressions import *
  >>> c = cst(253,8)
@@ -682,7 +686,7 @@ need to set it.
 The ``cst`` class is special because it is the only class that can be used as a
 Python boolean type:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> e==0xff
  <amoco.cas.expressions.cst object at 0x9efd7ac>
@@ -703,7 +707,7 @@ In Amoco, the **only** expression that evaluates to True is ``cst(1,1)``.
 
 Expressions of type ``sym`` are constants equipped with a symbol string for printing purpose only:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> s = sym('Hubble',42,8)
  >>> print s
@@ -723,7 +727,7 @@ Expressions of class ``reg`` are pure symbolic values.
 They are essentially used for representing the registers of a CPU, as "right-values"
 or left-values (locations). More details on *locations* in mapper_.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> a = reg('%a',32)
  >>> print a
@@ -771,7 +775,7 @@ and an optional ``seg`` attribute to be used by MemoryZone_ objects.
 As illustrated below, simplification of ``ptr`` objects tends to extract constant
 offsets found in the base expression to adjust the ``disp`` field.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> a = reg('a',32)
  >>> p = ptr(a)
@@ -786,7 +790,7 @@ offsets found in the base expression to adjust the ``disp`` field.
 A ``mem`` object is a symbolic memory value equipped with a pointer, a size, and
 a special ``.mods`` attribute that will be discussed in mapper_.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> x = mem(p,64,disp=2)
  >>> y = mem(q-5,48,disp=-10)
@@ -803,7 +807,7 @@ Operators
 
 Unary operators (``+``, ``-`` and ``~``) have elementary simplification rules:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> a = reg('a',32)
  >>> assert +a == -(-a)
@@ -818,7 +822,7 @@ required by the other expression member. Thus, it is possible to write ``r1+2`` 
 Binary operations have elementary simplification rules that try to arrange symbols
 in lexical order and move constants to the right side of the expression.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> a = reg('a',32)
  >>> b = reg('b',32)
@@ -875,7 +879,7 @@ least-to-most significant order, is the preferred method for instanciating compo
 Since ``comp`` is essentially a container class for other expressions, the resulting object
 is possibly of another class if some simplification occured.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> composer([cst(1,8),cst(2,8),cst(3,8)])
  <amoco.cas.expressions.cst at 0x7f9468252c20>
@@ -904,7 +908,7 @@ A ``slc`` expression is obtained by using a python slice object of the form [sta
 where start/stop are non-negative integers in the bit range of the sliced expression.
 Simplification occurs when the sliced expression is itself of class ``slc`` or ``mem``:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> a = reg('%a',32)
  >>> ah = slc(a,24,8,ref='%ah')
@@ -938,7 +942,7 @@ The ``tst`` class is used for conditional expressions in the form ``tst(cond, eT
 where ``cond`` is an expression, ``eT`` is the resulting expression whenever
 ``cond==1`` and ``eF`` is the resulting expression whenever ``cond==0``.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> t = tst(a>0, c, cst(0xdeadbe,24))
  >>> print t
@@ -963,7 +967,7 @@ to the execution of the captured instructions.
 As shown in the ``i_MOVcc`` example above, the ``fmap`` argument of every instruction semantics
 is a mapper on which the instruction currently operates (see asm_).
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> from amoco.arch.x86.env import *
  >>> from amoco.cas.mapper import mapper
@@ -998,7 +1002,7 @@ The mapper class defines two essential methods to set and get expressions in and
 
 A *push* instruction could thus be implemented using:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> def push(fmap,x):
  ...   fmap[esp] = fmap(esp)-x.length
@@ -1019,7 +1023,7 @@ Note that a ``__getitem__`` method is implemented as well in order to fetch item
 that are locations of the mapper. So here, to get the value at the top of stack, we
 can do:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print m[mem(esp-8,32)]  # fetch the expression associated with ptr (esp-8)
  ebx
@@ -1034,7 +1038,7 @@ The internal memory model of a mapper is a MemoryMap_: symbolic memory locations
 to individual separated MemoryZone_ objects that deal with all read/write to/from location's
 ``ptr.base`` expression.
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print m.memory()
  <MemoryZone rel=None :>
@@ -1045,7 +1049,7 @@ to individual separated MemoryZone_ objects that deal with all read/write to/fro
 This model allows to access offsets that have not been explicitly written to before.
 For example, if we now execute *mov ecx, [esp+2]* we still fetch the correct expression:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> m[ecx] = m(mem(esp+2,32))
  >>> print m(ecx)
@@ -1054,7 +1058,7 @@ For example, if we now execute *mov ecx, [esp+2]* we still fetch the correct exp
 However, aliasing between zones is possible a must be avoided: imagine that we now
 execute *mov byte ptr [eax], 0x42*, we obtain:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> m[mem(eax,8)] = cst(0x42,8)
  >>> print m
@@ -1075,7 +1079,7 @@ If we now again fetch memory at ``esp+2`` the previous answer is not valid anymo
 to a possible aliasing (overlapping) of ``eax`` and ``esp`` zones. Think of what should
 the memory look like if ``eax`` value was ``esp-4`` for example. Let's try:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print m(mem(esp+2,32))
  M32$3(esp-6)
@@ -1091,7 +1095,7 @@ these mods are taken into account whenever the expression is evaluated in anothe
 
 Note that it is possible to force the mapper class to *assume no aliasing* :
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> print mapper.assume_no_aliasing
  False
@@ -1103,7 +1107,7 @@ In Amoco, a mapper instance is created for every basic block. The right
 and left shift operators allow for right of left composition so that symbolic
 forward or backward execution of several basic blocks is easy:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> m1 = mapper()
  >>> m1[eax] = ebx
@@ -1155,7 +1159,7 @@ into z3_ equivalent objects. The interface with z3_ is implemented in ``cas/smt.
 When the ``smt`` module is imported it replaces the ``.to_smtlib()`` method of
 every expression class (which by default raises UnImplementedError).
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  >>> from amoco.arch.x86.env import *
  >>> from amoco.cas import smt
@@ -1316,7 +1320,7 @@ System calls and externals are emulated by implementing ``stubs`` that modify a 
 is a Python function decorated with ``@stub``. For example, for example in
 the *Linux* system (see ``linux_x86.py``), the *__libc_start_main* is approximated by:
 
-.. sourcecode:: python
+.. sourcecode:: python2
 
  @stub
  def __libc_start_main(m,**kargs):
@@ -1333,6 +1337,56 @@ Please see `LICENSE`_.
 
 Changelog
 =========
+
+- `v2.4.5`_
+
+  * add x86/x64 internals 'mode' selector
+  * add 'lab' expression for labels
+  * improve MemoryZone/Map with a 'grep' method
+  * improve MemoryZone to allow "shifting" to some address
+  * improve x86 AT&T formatter
+  * add x64 decoder tests
+  * fix x64 rip-relative addressing mode
+  * fix many x64 specs
+  * add x64 packed-instructions semantics
+  * fix various x86 SSE instructions
+  * fix various x86 issues (fisttp/SETcc/PUSH imm8/movq)
+
+- `v2.4.4`_
+
+  * add some SSE instruction semantics
+  * add ui.graphics qt package with block/func/xfunc items classes
+  * add initial ui.graphics gtk package
+  * move vltable in ui.views.blockView class
+  * fix various x86/64 decoding/formating/semantics
+
+- `v2.4.3`_
+
+  * add ui.graphics packages (emptied)
+  * add ui.views module with support for block/func/xfunc
+  * add ui.render.vltable class to pretty print tables
+  * improve instruction formatter class to access pp tokens
+  * cleaner itercfg and lbackward algorithms
+  * add vecw expression class to represent 'widened' vec expressions
+  * improve Memory write of vec expressions
+  * improve widening and fixpoint in func.makemap()
+  * add 'type' attribute (std/pc/flags/stack/other)
+  * define register type for x86 arch
+  * fix some x86/64 decoding/formating/semantics
+  * update travis config, fix pytest vs. Token.
+
+- `v2.4.2`_
+
+  * merge support for pygments pretty printing methods (in ui.render module)
+  * add x86 hilighted syntax formatter (in arch.x86.formats)
+  * expose expression's pretty printing interface (exp.pp(), exp.toks())
+  * remove default config class fallback (ConfigParser is standard)
+  * merge some samples and tests ported to pytest package
+  * use setuptools, add tox.ini and travis-ci config
+  * fix some x86/x64 semantics
+  * improve sparc v8 formats
+  * add sparc coprocessor registers
+  * update README
 
 - `v2.4.1`_
 
@@ -1412,6 +1466,10 @@ Changelog
 .. _ply: http://www.dabeaz.com/ply/
 .. _zodb: http://www.zodb.org
 .. _LICENSE: https://github.com/bdcht/amoco/blob/release/LICENSE
+.. _v2.4.5: https://github.com/bdcht/amoco/releases/tag/v2.4.5
+.. _v2.4.4: https://github.com/bdcht/amoco/releases/tag/v2.4.4
+.. _v2.4.3: https://github.com/bdcht/amoco/releases/tag/v2.4.3
+.. _v2.4.2: https://github.com/bdcht/amoco/releases/tag/v2.4.2
 .. _v2.4.1: https://github.com/bdcht/amoco/releases/tag/v2.4.1
 .. _v2.4.0: https://github.com/bdcht/amoco/releases/tag/v2.4.0
 .. _v2.3.5: https://github.com/bdcht/amoco/releases/tag/v2.3.5
